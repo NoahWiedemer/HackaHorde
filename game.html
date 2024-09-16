@@ -1,0 +1,896 @@
+<!-- game2/game.html -->
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Endlose Welt Spiel mit Zombies und Munition</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #111;
+            font-family: 'Pixelify Sans', sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Balancing variables
+        const PLAYER_SPEED = 5; // Player movement speed
+        const PLAYER_MAX_HEALTH = 100; // Maximum player health
+        const PLAYER_MAX_AMMO = 20; // Maximum player ammo
+        const ZOMBIE_SPEED = 2; // Zombie movement speed
+        const ZOMBIE_DAMAGE = 23; // Damage dealt by zombies
+        const ZOMBIE_ATTACK_COOLDOWN = 1000; // Time between zombie attacks (ms)
+        const PROJECTILE_SPEED = 10; // Speed of player's projectiles
+        const PROJECTILE_SIZE = 5; // Size of player's projectiles
+        const RIFLE_FIRE_RATE = 100; // Time between rifle shots (ms)
+        const RIFLE_AMMO_CONSUMPTION = 0.2; // Ammo consumed per rifle shot (1/5)
+        const RIFLE_DROP_CHANCE = 0.2; // 20% chance for a crate to drop a rifle
+        const HEALTH_PACK_HEAL = 50; // Amount of health restored by a health pack
+        const AMMO_PACK_REFILL = 10; // Amount of ammo restored by an ammo pack
+
+        const player = {
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            size: 40,
+            speed: PLAYER_SPEED,
+            health: PLAYER_MAX_HEALTH,
+            ammo: PLAYER_MAX_AMMO,
+            angle: 0,
+            weapon: 'pistol' // New property to track current weapon
+        };
+
+        const camera = { x: 0, y: 0 };
+        const trees = [];
+        const treeCount = 100;
+        const treeImages = [
+            new Image(),
+            new Image(),
+            new Image(),
+            new Image()
+        ];
+        const treeBreakImage = new Image(); // New image for broken tree
+        const projectiles = [];
+        const zombieSpawners = [];
+        const zombies = [];
+        const spawnerCount = 500;
+        const spawnerRadius = 300;
+        const spawnerSize = 60;
+        const ammoPacks = [];
+        const healthPacks = [];
+        const ammoPackCount = 50;
+        const healthPackCount = 30;
+        const crates = [];
+        const crateCount = 50;
+        const crateImage = new Image();
+        crateImage.src = './assets/crate.png';
+        crateImage.onload = () => console.log('Crate image loaded');
+        crateImage.onerror = () => console.error('Failed to load crate image');
+
+        const rifleImage = new Image();
+        rifleImage.src = './assets/rifle.png';
+        rifleImage.onload = () => console.log('Rifle image loaded');
+        rifleImage.onerror = () => console.error('Failed to load rifle image');
+
+        let score = 0;
+        let gameOver = false;
+        let isMouseDown = false;
+        let lastRifleShot = 0;
+
+        treeImages[0].src = './assets/tree1.png';
+        treeImages[1].src = './assets/tree2.png';
+        treeImages[2].src = './assets/tree3.png';
+        treeImages[3].src = './assets/tree4.png';
+        treeBreakImage.src = './assets/tree_break.png'; // Load the breaking tree image
+
+        treeImages.forEach((img, index) => {
+            img.onload = () => console.log(`Tree image ${index + 1} loaded`);
+            img.onerror = () => console.error(`Failed to load tree image ${index + 1}`);
+        });
+
+        for (let i = 0; i < treeCount; i++) {
+            trees.push({
+                x: Math.random() * 10000 - 5000,
+                y: Math.random() * 10000 - 5000,
+                size: Math.random() * 40 + 40,
+                imageIndex: Math.floor(Math.random() * 4),
+                health: 2,
+                breaking: false,
+                breakingStart: 0
+            });
+        }
+
+        for (let i = 0; i < spawnerCount; i++) {
+            zombieSpawners.push({
+                x: Math.random() * 10000 - 5000,
+                y: Math.random() * 10000 - 5000,
+                lastSpawn: 0,
+                health: 3
+            });
+        }
+
+        for (let i = 0; i < ammoPackCount; i++) {
+            ammoPacks.push({
+                x: Math.random() * 10000 - 5000,
+                y: Math.random() * 10000 - 5000,
+                size: 15
+            });
+        }
+
+        for (let i = 0; i < healthPackCount; i++) {
+            healthPacks.push({
+                x: Math.random() * 10000 - 5000,
+                y: Math.random() * 10000 - 5000,
+                size: 15
+            });
+        }
+
+        for (let i = 0; i < crateCount; i++) {
+            crates.push({
+                x: Math.random() * 10000 - 5000,
+                y: Math.random() * 10000 - 5000,
+                size: 80,
+                health: 1
+            });
+        }
+
+        const keys = {};
+
+        window.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        window.addEventListener('mousedown', () => {
+            isMouseDown = true;
+        });
+
+        window.addEventListener('mouseup', () => {
+            isMouseDown = false;
+        });
+
+        canvas.addEventListener('click', (e) => {
+            if (gameOver) {
+                const buttonWidth = 200;
+                const buttonHeight = 50;
+                const buttonX = canvas.width / 2 - buttonWidth / 2;
+                const buttonY = canvas.height / 2 + 100;
+
+                if (e.clientX >= buttonX && e.clientX <= buttonX + buttonWidth &&
+                    e.clientY >= buttonY && e.clientY <= buttonY + buttonHeight) {
+                    resetGame();
+                }
+            } else {
+                fireWeapon(e);
+            }
+        });
+
+        function fireWeapon(e) {
+            if (player.ammo <= 0) return;
+
+            const angle = Math.atan2(
+                e.clientY - canvas.height / 2,
+                e.clientX - canvas.width / 2
+            );
+
+            if (player.weapon === 'pistol') {
+                createProjectile(angle);
+                player.ammo--;
+            } else if (player.weapon === 'rifle') {
+                const now = Date.now();
+                if (now - lastRifleShot > RIFLE_FIRE_RATE) {
+                    createProjectile(angle);
+                    player.ammo -= RIFLE_AMMO_CONSUMPTION;
+                    lastRifleShot = now;
+                }
+            }
+        }
+
+        function createProjectile(angle) {
+            projectiles.push({
+                x: player.x,
+                y: player.y,
+                speed: PROJECTILE_SPEED,
+                angle: angle,
+                size: PROJECTILE_SIZE
+            });
+        }
+
+        function spawnZombie(spawner) {
+            const angle = Math.random() * Math.PI * 2;
+            zombies.push({
+                x: spawner.x + Math.cos(angle) * 50,
+                y: spawner.y + Math.sin(angle) * 50,
+                size: 60,
+                speed: ZOMBIE_SPEED,
+                lastAttack: 0
+            });
+        }
+
+        let gameState = 'menu';
+        let gameStartTime = 0;
+        const maxSpawnTime = 120000;
+        const initialSpawnInterval = 5000;
+        const minSpawnInterval = 1000;
+
+        function updateZombies() {
+            if (gameState !== 'playing') return;
+
+            const now = Date.now();
+            const gameTime = now - gameStartTime;
+            const spawnInterval = Math.max(
+                minSpawnInterval,
+                initialSpawnInterval - (initialSpawnInterval - minSpawnInterval) * Math.min(gameTime / maxSpawnTime, 1)
+            );
+
+            for (const spawner of zombieSpawners) {
+                if (Math.abs(spawner.x - player.x) < spawnerRadius && 
+                    Math.abs(spawner.y - player.y) < spawnerRadius) {
+                    if (now - spawner.lastSpawn > spawnInterval) {
+                        spawnZombie(spawner);
+                        spawner.lastSpawn = now;
+                    }
+                }
+            }
+
+            for (let i = zombies.length - 1; i >= 0; i--) {
+                const zombie = zombies[i];
+                const dx = player.x - zombie.x;
+                const dy = player.y - zombie.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < player.size / 2 + zombie.size / 2) {
+                    if (now - zombie.lastAttack > ZOMBIE_ATTACK_COOLDOWN) {
+                        player.health -= ZOMBIE_DAMAGE;
+                        if (player.health < 0) player.health = 0;
+                        zombie.lastAttack = now;
+                        if (player.health <= 0) gameOver = true;
+                    }
+                } else {
+                    zombie.x += (dx / distance) * zombie.speed;
+                    zombie.y += (dy / distance) * zombie.speed;
+                }
+            }
+        }
+
+        function update() {
+            if (gameState !== 'playing') return;
+
+            let dx = 0;
+            let dy = 0;
+
+            if (keys['w']) dy -= player.speed;
+            if (keys['s']) dy += player.speed;
+            if (keys['a']) dx -= player.speed;
+            if (keys['d']) dx += player.speed;
+
+            if (dx !== 0 || dy !== 0) {
+                player.angle = Math.atan2(dy, dx);
+                
+                let newX = player.x + dx;
+                let newY = player.y + dy;
+
+                let canMove = true;
+                for (const tree of trees) {
+                    const distance = Math.sqrt(
+                        Math.pow(newX - tree.x, 2) + Math.pow(newY - tree.y, 2)
+                    );
+                    if (distance < (player.size / 2 + tree.size / 2) * 0.8) {
+                        canMove = false;
+                        break;
+                    }
+                }
+
+                if (canMove && player.health > 0) {
+                    player.x = newX;
+                    player.y = newY;
+                }
+            }
+
+            camera.x = player.x - canvas.width / 2;
+            camera.y = player.y - canvas.height / 2;
+
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                const projectile = projectiles[i];
+                projectile.x += Math.cos(projectile.angle) * projectile.speed;
+                projectile.y += Math.sin(projectile.angle) * projectile.speed;
+
+                if (Math.abs(projectile.x - player.x) > canvas.width ||
+                    Math.abs(projectile.y - player.y) > canvas.height) {
+                    projectiles.splice(i, 1);
+                    continue;
+                }
+
+                for (let j = trees.length - 1; j >= 0; j--) {
+                    const tree = trees[j];
+                    const dx = projectile.x - tree.x;
+                    const dy = projectile.y - tree.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < tree.size / 2 + projectile.size) {
+                        projectiles.splice(i, 1);
+                        tree.health--;
+
+                        if (tree.health <= 0) {
+                            tree.breaking = true;
+                            tree.breakingStart = Date.now();
+
+                            if (Math.random() < 0.5) {
+                                if (Math.random() < 0.5) {
+                                    healthPacks.push({
+                                        x: tree.x,
+                                        y: tree.y,
+                                        size: 15
+                                    });
+                                } else {
+                                    ammoPacks.push({
+                                        x: tree.x,
+                                        y: tree.y,
+                                        size: 15
+                                    });
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+
+                for (let j = crates.length - 1; j >= 0; j--) {
+                    const crate = crates[j];
+                    const dx = projectile.x - crate.x;
+                    const dy = projectile.y - crate.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < crate.size / 2 + projectile.size) {
+                        projectiles.splice(i, 1);
+                        crates.splice(j, 1);
+
+                        if (Math.random() < RIFLE_DROP_CHANCE) {
+                            ammoPacks.push({
+                                x: crate.x,
+                                y: crate.y,
+                                size: 15,
+                                type: 'rifle'
+                            });
+                        } else {
+                            if (Math.random() < 0.5) {
+                                healthPacks.push({
+                                    x: crate.x,
+                                    y: crate.y,
+                                    size: 15
+                                });
+                            } else {
+                                ammoPacks.push({
+                                    x: crate.x,
+                                    y: crate.y,
+                                    size: 15
+                                });
+                            }
+                        }
+                        break;
+                    }
+                }
+
+                for (let j = zombies.length - 1; j >= 0; j--) {
+                    const zombie = zombies[j];
+                    const dx = projectile.x - zombie.x;
+                    const dy = projectile.y - zombie.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < zombie.size / 2 + projectile.size) {
+                        zombies.splice(j, 1);
+                        projectiles.splice(i, 1);
+                        score++;
+
+                        if (Math.random() < 0.1) {
+                            ammoPacks.push({
+                                x: zombie.x,
+                                y: zombie.y,
+                                size: 15
+                            });
+                        }
+
+                        break;
+                    }
+                }
+
+                for (let j = zombieSpawners.length - 1; j >= 0; j--) {
+                    const spawner = zombieSpawners[j];
+                    const dx = projectile.x - spawner.x;
+                    const dy = projectile.y - spawner.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < spawnerSize / 2 + projectile.size) {
+                        spawner.health--;
+                        projectiles.splice(i, 1);
+                        if (spawner.health <= 0) {
+                            zombieSpawners.splice(j, 1);
+                            score += 5;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            for (let i = trees.length - 1; i >= 0; i--) {
+                if (trees[i].breaking && Date.now() - trees[i].breakingStart > 500) {
+                    trees.splice(i, 1);
+                }
+            }
+
+            updateZombies();
+
+            for (let i = ammoPacks.length - 1; i >= 0; i--) {
+                const ammoPack = ammoPacks[i];
+                const dx = player.x - ammoPack.x;
+                const dy = player.y - ammoPack.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < player.size / 2 + ammoPack.size / 2) {
+                    if (ammoPack.type === 'rifle') {
+                        player.weapon = 'rifle';
+                    } else {
+                        player.ammo = Math.min(player.ammo + AMMO_PACK_REFILL, PLAYER_MAX_AMMO);
+                    }
+                    ammoPacks.splice(i, 1);
+                }
+            }
+
+            for (let i = healthPacks.length - 1; i >= 0; i--) {
+                const healthPack = healthPacks[i];
+                const dx = player.x - healthPack.x;
+                const dy = player.y - healthPack.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < player.size / 2 + healthPack.size / 2) {
+                    player.health = Math.min(player.health + HEALTH_PACK_HEAL, PLAYER_MAX_HEALTH);
+                    healthPacks.splice(i, 1);
+                }
+            }
+
+            if (player.health <= 0) {
+                gameState = 'gameOver';
+            }
+
+            if (isMouseDown && player.weapon === 'rifle') {
+                fireWeapon({ clientX: canvas.width / 2, clientY: canvas.height / 2 });
+            }
+        }
+
+        function drawBar(x, y, width, height, value, maxValue, color) {
+            const pixelSize = 4;
+            ctx.fillStyle = '#333';
+            ctx.fillRect(x, y, width, height);
+
+            const filledWidth = Math.floor((value / maxValue) * (width / pixelSize)) * pixelSize;
+            ctx.fillStyle = color;
+            for (let i = 0; i < filledWidth; i += pixelSize) {
+                for (let j = 0; j < height; j += pixelSize) {
+                    ctx.fillRect(x + i, y + j, pixelSize - 1, pixelSize - 1);
+                }
+            }
+
+            ctx.strokeStyle = '#fff';
+            ctx.strokeRect(x, y, width, height);
+
+            ctx.fillStyle = '#fff';
+            ctx.font = '16px "Pixelify Sans"';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${value} / ${maxValue}`, x + width / 2, y + height + 20);
+        }
+
+        function drawSpawnerHealthBar(spawner) {
+            const barWidth = 20;
+            const barHeight = 4;
+            const x = spawner.x - camera.x - barWidth / 2;
+            const y = spawner.y - camera.y - spawnerSize / 2 - 10;
+
+            ctx.fillStyle = '#333';
+            ctx.fillRect(x, y, barWidth, barHeight);
+
+            const healthWidth = (spawner.health / 3) * barWidth;
+            ctx.fillStyle = '#f00';
+            ctx.fillRect(x, y, healthWidth, barHeight);
+
+            ctx.strokeStyle = '#fff';
+            ctx.strokeRect(x, y, barWidth, barHeight);
+        }
+
+        const floorImage = new Image();
+        floorImage.src = './assets/floor.png';
+        floorImage.onload = () => console.log('Floor image loaded');
+        floorImage.onerror = () => console.error('Failed to load floor image');
+
+        const ammoImage = new Image();
+        ammoImage.src = './assets/ammo.png';
+        ammoImage.onload = () => console.log('Ammo image loaded');
+        ammoImage.onerror = () => console.error('Failed to load ammo image');
+
+        const zombieImage = new Image();
+        zombieImage.src = './assets/zombie.png';
+        zombieImage.onload = () => console.log('Zombie image loaded');
+        zombieImage.onerror = () => console.error('Failed to load zombie image');
+
+        const spawnerImage = new Image();
+        spawnerImage.src = './assets/spawner.png';
+        spawnerImage.onload = () => console.log('Spawner image loaded');
+        spawnerImage.onerror = () => console.error('Failed to load spawner image');
+
+        const playerImage = new Image();
+        playerImage.src = './assets/player.png';
+        playerImage.onload = () => console.log('Player image loaded');
+        playerImage.onerror = () => console.error('Failed to load player image');
+
+        const healthImage = new Image();
+        healthImage.src = './assets/health.png';
+        healthImage.onload = () => console.log('Health image loaded');
+        healthImage.onerror = () => console.error('Failed to load health image');
+
+        let showInstructions = false;
+        let instructions = '';
+
+        function draw() {
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            drawGameElements();
+
+            if (gameState === 'menu' || gameState === 'gameOver') {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            if (gameState === 'menu') {
+                drawMenu();
+            } else if (gameState === 'gameOver') {
+                drawGameOver();
+            }
+
+            if (showInstructions) {
+                drawInstructions();
+            }
+        }
+
+        function drawGameElements() {
+            const patternSize = 256;
+            const startX = Math.floor(camera.x / patternSize) * patternSize - camera.x;
+            const startY = Math.floor(camera.y / patternSize) * patternSize - camera.y;
+            const endX = startX + canvas.width + patternSize;
+            const endY = startY + canvas.height + patternSize;
+
+            for (let x = startX; x < endX; x += patternSize) {
+                for (let y = startY; y < endY; y += patternSize) {
+                    ctx.drawImage(floorImage, x, y, patternSize, patternSize);
+                }
+            }
+
+            for (const tree of trees) {
+                if (tree.breaking) {
+                    const progress = (Date.now() - tree.breakingStart) / 500;
+                    const scale = 1 - progress;
+                    ctx.globalAlpha = 1 - progress;
+                    ctx.drawImage(
+                        treeBreakImage,
+                        tree.x - camera.x - (tree.size * scale) / 2,
+                        tree.y - camera.y - (tree.size * scale),
+                        tree.size * scale,
+                        tree.size * scale * (treeBreakImage.height / treeBreakImage.width)
+                    );
+                    ctx.globalAlpha = 1;
+                } else {
+                    const img = treeImages[tree.imageIndex];
+                    ctx.drawImage(
+                        img,
+                        tree.x - camera.x - tree.size / 2,
+                        tree.y - camera.y - tree.size,
+                        tree.size,
+                        tree.size * (img.height / img.width)
+                    );
+                }
+            }
+
+            for (const spawner of zombieSpawners) {
+                ctx.drawImage(
+                    spawnerImage,
+                    spawner.x - camera.x - spawnerSize / 2,
+                    spawner.y - camera.y - spawnerSize / 2,
+                    spawnerSize,
+                    spawnerSize
+                );
+                drawSpawnerHealthBar(spawner);
+            }
+
+            for (const zombie of zombies) {
+                const angle = Math.atan2(player.y - zombie.y, player.x - zombie.x);
+                ctx.save();
+                ctx.translate(zombie.x - camera.x, zombie.y - camera.y);
+                ctx.rotate(angle);
+                ctx.drawImage(
+                    zombieImage,
+                    -zombie.size / 2,
+                    -zombie.size / 2,
+                    zombie.size,
+                    zombie.size
+                );
+                ctx.restore();
+            }
+
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate(player.angle + Math.PI / 2);
+            ctx.drawImage(
+                playerImage,
+                -player.size / 2,
+                -player.size / 2,
+                player.size,
+                player.size
+            );
+            ctx.restore();
+
+            ctx.fillStyle = '#ff0';
+            for (const projectile of projectiles) {
+                ctx.beginPath();
+                ctx.arc(
+                    projectile.x - camera.x,
+                    projectile.y - camera.y,
+                    projectile.size,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.fill();
+            }
+
+            for (const ammoPack of ammoPacks) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(
+                    ammoPack.x - camera.x,
+                    ammoPack.y - camera.y,
+                    ammoPack.size * 1.2,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.fillStyle = ammoPack.type === 'rifle' ? 'rgba(0, 255, 0, 0.3)' : 'rgba(255, 255, 0, 0.3)';
+                ctx.filter = 'blur(8px)';
+                ctx.fill();
+                ctx.filter = 'none';
+                ctx.restore();
+
+                const image = ammoPack.type === 'rifle' ? rifleImage : ammoImage;
+                ctx.drawImage(
+                    image,
+                    ammoPack.x - camera.x - ammoPack.size,
+                    ammoPack.y - camera.y - ammoPack.size,
+                    ammoPack.size * 2,
+                    ammoPack.size * 2
+                );
+            }
+
+            for (const healthPack of healthPacks) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(
+                    healthPack.x - camera.x,
+                    healthPack.y - camera.y,
+                    healthPack.size * 1.2,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+                ctx.filter = 'blur(8px)';
+                ctx.fill();
+                ctx.filter = 'none';
+                ctx.restore();
+
+                ctx.drawImage(
+                    healthImage,
+                    healthPack.x - camera.x - healthPack.size,
+                    healthPack.y - camera.y - healthPack.size,
+                    healthPack.size * 2,
+                    healthPack.size * 2
+                );
+            }
+
+            for (const crate of crates) {
+                ctx.drawImage(
+                    crateImage,
+                    crate.x - camera.x - crate.size / 2,
+                    crate.y - camera.y - crate.size / 2,
+                    crate.size,
+                    crate.size
+                );
+            }
+
+            drawBar(canvas.width - 220, canvas.height - 60, 200, 20, player.health, PLAYER_MAX_HEALTH, '#f00');
+
+            drawBar(canvas.width - 220, canvas.height - 120, 200, 20, player.ammo, PLAYER_MAX_AMMO, '#ff0');
+
+            ctx.fillStyle = '#fff';
+            ctx.font = '24px "Pixelify Sans"';
+            ctx.textAlign = 'left';
+            ctx.fillText(`Score: ${score}`, 20, 40);
+            ctx.fillText(`Weapon: ${player.weapon}`, 20, 80);
+        }
+
+        function drawMenu() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#fff';
+            ctx.font = '64px "Pixelify Sans"';
+            ctx.textAlign = 'center';
+            ctx.fillText('HackaHorde', canvas.width / 2, canvas.height / 2 - 100);
+
+            drawButton('Start', canvas.width / 2, canvas.height / 2, 200, 50);
+            drawButton('Instructions', canvas.width / 2, canvas.height / 2 + 70, 200, 50);
+        }
+
+        function drawButton(text, x, y, width, height) {
+            ctx.fillStyle = '#FFA500';
+            ctx.fillRect(x - width / 2, y - height / 2, width, height);
+            
+            ctx.fillStyle = '#000';
+            ctx.font = '24px "Pixelify Sans"';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, x, y);
+        }
+
+        function drawInstructions() {
+            ctx.fillStyle = 'rgba(255, 255, 240, 0.9)';
+            ctx.fillRect(20, 20, canvas.width - 40, canvas.height - 40);
+            
+            ctx.fillStyle = '#000';
+            ctx.font = '24px "Pixelify Sans"';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+
+            const lines = instructions.split('\n');
+            lines.forEach((line, index) => {
+                ctx.fillText(line, 40, 40 + index * 30);
+            });
+
+            ctx.fillStyle = '#FF0000';
+            ctx.fillRect(canvas.width - 50, 20, 30, 30);
+            ctx.fillStyle = '#FFF';
+            ctx.font = '24px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('X', canvas.width - 35, 35);
+        }
+
+        function drawGameOver() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#fff';
+            ctx.font = '48px "Pixelify Sans"';
+            ctx.textAlign = 'center';
+            ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 50);
+            ctx.font = '24px "Pixelify Sans"';
+            ctx.fillText(`Final Score: ${score}`, canvas.width / 2, canvas.height / 2 + 50);
+
+            const buttonWidth = 200;
+            const buttonHeight = 50;
+            const buttonX = canvas.width / 2 - buttonWidth / 2;
+            const buttonY = canvas.height / 2 + 100;
+
+            ctx.fillStyle = '#FFA500';
+            ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
+            
+            ctx.fillStyle = '#000';
+            ctx.font = '24px "Pixelify Sans"';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('Try Again', canvas.width / 2, buttonY + buttonHeight / 2);
+        }
+
+        // Modify the click event listener
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            if (gameState === 'menu') {
+                const startButtonBounds = {x: canvas.width / 2 - 100, y: canvas.height / 2 - 25, width: 200, height: 50};
+                const instructionsButtonBounds = {x: canvas.width / 2 - 100, y: canvas.height / 2 + 45, width: 200, height: 50};
+
+                if (isClickInsideRect(e, startButtonBounds)) {
+                    gameState = 'playing';
+                    gameStartTime = Date.now();
+                    resetGame();
+                } else if (isClickInsideRect(e, instructionsButtonBounds)) {
+                    showInstructions = true;
+                }
+            } else if (gameState === 'playing') {
+                if (showInstructions) {
+                    const closeButtonBounds = {x: canvas.width - 50, y: 20, width: 30, height: 30};
+                    if (isClickInsideRect(x, y, closeButtonBounds)) {
+                        showInstructions = false;
+                    }
+                } else {
+                    fireWeapon(e);
+                }
+            } else if (gameState === 'gameOver') {
+                const tryAgainButtonBounds = {x: canvas.width / 2 - 100, y: canvas.height / 2 + 75, width: 200, height: 50};
+                if (isClickInsideRect(e, tryAgainButtonBounds)) {
+                    resetGame();
+                    gameState = 'playing';
+                }
+            }
+        });
+
+        function isClickInsideRect(event, rect) {
+            return event.clientX >= rect.x && event.clientX <= rect.x + rect.width &&
+                   event.clientY >= rect.y && event.clientY <= rect.y + rect.height;
+        }
+
+        // Modify the resetGame function
+        function resetGame() {
+            player.x = canvas.width / 2;
+            player.y = canvas.height / 2;
+            player.health = PLAYER_MAX_HEALTH;
+            player.ammo = PLAYER_MAX_AMMO;
+            player.weapon = 'pistol';
+            score = 0;
+            gameOver = false;
+            zombies.length = 0;
+            projectiles.length = 0;
+
+            // Reset crates
+            crates.length = 0;
+            for (let i = 0; i < crateCount; i++) {
+                crates.push({
+                    x: Math.random() * 10000 - 5000,
+                    y: Math.random() * 10000 - 5000,
+                    size: 80,
+                    health: 1
+                });
+            }
+
+            // Reset zombie spawners
+            for (const spawner of zombieSpawners) {
+                spawner.lastSpawn = 0;
+            }
+
+            // Reset other game elements as needed
+            // ...
+
+            gameStartTime = Date.now();
+        }
+
+        // Load instructions
+        fetch('./instructions.md')
+            .then(response => response.text())
+            .then(text => {
+                instructions = text;
+            })
+            .catch(error => console.error('Error loading instructions:', error));
+
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        loop();
+    </script>
+</body>
+</html>
